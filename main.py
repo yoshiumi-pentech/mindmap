@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import simpledialog
+import json  # For saving and loading data
 
 class MindMapApp:
     def __init__(self, root):
@@ -17,6 +18,8 @@ class MindMapApp:
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
 
         self.create_menu()
+        self.load_state()  # Load saved state on startup
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)  # Handle app close event
 
     def create_menu(self):
         menu = tk.Menu(self.root)
@@ -54,7 +57,10 @@ class MindMapApp:
         clicked_items = self.canvas.find_overlapping(event.x, event.y, event.x, event.y)
         for item in clicked_items:
             if item in self.nodes:
+                # Select the new node
                 self.selected_node = item
+                #self.canvas.itemconfig(self.selected_node, width=2)  # Increase outline thickness
+                print(f"Selected node: {self.nodes[item]['label']}")  # Debug statement
                 break
         else:
             # If no node is clicked, create a new node at the clicked position
@@ -71,6 +77,48 @@ class MindMapApp:
 
     def on_release(self, event):
         self.selected_node = None
+
+    def save_state(self):
+        """Save the current state of nodes and connections to a file."""
+        data = {
+            "nodes": {
+                node_id: {
+                    "label": node_data["label"],
+                    "x": node_data["x"],
+                    "y": node_data["y"]
+                }
+                for node_id, node_data in self.nodes.items()
+            },
+            "connections": self.connections
+        }
+        with open("mindmap_state.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+    def load_state(self):
+        """Load the saved state of nodes and connections from a file."""
+        try:
+            with open("mindmap_state.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+                for node_id, node_data in data["nodes"].items():
+                    x, y = node_data["x"], node_data["y"]
+                    node_id = self.canvas.create_oval(x-30, y-30, x+30, y+30, fill="lightblue", outline="black")
+                    text_id = self.canvas.create_text(x, y, text=node_data["label"], font=("Arial", 12))
+                    self.nodes[node_id] = {"text_id": text_id, "label": node_data["label"], "x": x, "y": y}
+                    self.canvas.tag_bind(text_id, "<Double-1>", lambda event, nid=node_id: self.edit_node_label(nid))
+                self.connections = data["connections"]
+                for connection in self.connections:
+                    parent = connection["parent"]
+                    child = connection["child"]
+                    parent_x, parent_y = self.nodes[parent]["x"], self.nodes[parent]["y"]
+                    child_x, child_y = self.nodes[child]["x"], self.nodes[child]["y"]
+                    self.canvas.create_line(parent_x, parent_y, child_x, child_y, fill="black")
+        except FileNotFoundError:
+            pass  # No saved state exists
+
+    def on_close(self):
+        """Handle the application close event."""
+        self.save_state()  # Save the current state
+        self.root.destroy()
 
 if __name__ == "__main__":
     print("Starting MindMapApp...")  # Debug statement to confirm script execution
