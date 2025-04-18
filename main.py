@@ -18,6 +18,7 @@ class MindMapApp:
         self.canvas.bind("<Button-1>", self.on_canvas_click)
         self.canvas.bind("<B1-Motion>", self.on_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
+        self.root.bind("<BackSpace>", self.delete_active_node)  # Bind Backspace key to delete node
 
         self.create_menu()
         self.load_state()  # Load saved state on startup
@@ -162,6 +163,31 @@ class MindMapApp:
         """Handle the application close event."""
         self.save_state()  # Save the current state
         self.root.destroy()
+
+    def delete_active_node(self, event=None):
+        """Delete the active node, its child nodes, and all associated lines recursively."""
+        if self.active_node:
+            def delete_node_and_children(node_id):
+                # Find all children of the current node
+                children = [child for child, parent in self.hierarchy.items() if parent == node_id]
+                for child in children:
+                    delete_node_and_children(child)  # Recursively delete child nodes
+
+                # Remove lines connected to the node
+                for line in self.canvas.find_withtag(f"line_{node_id}"):
+                    self.canvas.delete(line)
+
+                # Remove the node and its text
+                self.canvas.delete(node_id)
+                self.canvas.delete(self.nodes[node_id]["text_id"])
+                if node_id in self.hierarchy:
+                    del self.hierarchy[node_id]
+                del self.nodes[node_id]
+
+            # Start deletion from the active node
+            delete_node_and_children(self.active_node)
+            print(f"Active node {self.active_node} and its children with associated lines have been deleted.")
+            self.active_node = None
 
 if __name__ == "__main__":
     print("Starting MindMapApp...")  # Debug statement to confirm script execution
