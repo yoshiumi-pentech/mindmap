@@ -12,6 +12,8 @@ class MindMapApp:
         self.nodes = {}
         self.connections = []
         self.selected_node = None
+        self.active_node = None  # Track the active node for hierarchy
+        self.hierarchy = {}  # Store parent-child relationships
 
         self.canvas.bind("<Button-1>", self.on_canvas_click)
         self.canvas.bind("<B1-Motion>", self.on_drag)
@@ -29,11 +31,20 @@ class MindMapApp:
         menu.add_cascade(label="ノード", menu=node_menu)
         node_menu.add_command(label="ノードを追加", command=self.add_node)
 
-    def add_node(self, x, y):
+    def add_node(self, x, y, parent=None):
+        """Add a new node at the given position, optionally as a child of a parent node."""
         node_id = self.canvas.create_oval(x-30, y-30, x+30, y+30, fill="lightblue", outline="black")
         text_id = self.canvas.create_text(x, y, text="ダブルクリックで編集", font=("Arial", 12))
-        self.nodes[node_id] = {"text_id": text_id, "label": "ダブルクリックで編集", "x": x, "y": y}
+        level = 1 if parent is None else self.nodes[parent]["level"] + 1
+        self.nodes[node_id] = {"text_id": text_id, "label": "ダブルクリックで編集", "x": x, "y": y, "level": level}
         self.canvas.tag_bind(text_id, "<Double-1>", lambda event, nid=node_id: self.edit_node_label(nid))
+
+        # If a parent is specified, create a hierarchical relationship
+        if parent:
+            self.hierarchy[node_id] = parent
+            parent_x, parent_y = self.nodes[parent]["x"], self.nodes[parent]["y"]
+            self.canvas.create_line(parent_x, parent_y, x, y, fill="black")
+            print(f"Node {node_id} added as child of {parent}, Level: {level}")
 
     def edit_node_label(self, node_id):
         text_id = self.nodes[node_id]["text_id"]
@@ -53,18 +64,27 @@ class MindMapApp:
         entry.bind("<Return>", save_label)
         entry.bind("<FocusOut>", lambda event: entry.destroy())  # Destroy entry if focus is lost
 
+    def set_active_node(self, node_id):
+        """Set the given node as active and update its appearance."""
+        if self.active_node is not None:
+            self.canvas.itemconfig(self.active_node, width=1)  # Reset border thickness
+        self.active_node = node_id
+        self.canvas.itemconfig(self.active_node, width=3)  # Highlight the active node
+
     def on_canvas_click(self, event):
         clicked_items = self.canvas.find_overlapping(event.x, event.y, event.x, event.y)
         for item in clicked_items:
             if item in self.nodes:
-                # Select the new node
+                self.set_active_node(item)  # Set the clicked node as active
                 self.selected_node = item
-                #self.canvas.itemconfig(self.selected_node, width=2)  # Increase outline thickness
-                print(f"Selected node: {self.nodes[item]['label']}")  # Debug statement
+                print(f"Selected node: {self.nodes[item]['label']}, Level: {self.nodes[item]['level']}")  # Debug statement
                 break
         else:
             # If no node is clicked, create a new node at the clicked position
-            self.add_node(event.x, event.y)
+            if self.active_node:
+                self.add_node(event.x, event.y, parent=self.active_node)  # Add as child of active node
+            else:
+                self.add_node(event.x, event.y)  # Add as a root node
 
     def on_drag(self, event):
         if self.selected_node:
@@ -75,27 +95,37 @@ class MindMapApp:
             self.nodes[self.selected_node]["x"] = x
             self.nodes[self.selected_node]["y"] = y
 
+            # Update lines connecting to children
+            for child, parent in self.hierarchy.items():
+                if parent == self.selected_node:
+                    child_x, child_y = self.nodes[child]["x"], self.nodes[child]["y"]
+                    self.canvas.coords(self.canvas.find_withtag(f"line_{parent}_{child}"),
+                                       x, y, child_x, child_y)
+
     def on_release(self, event):
         self.selected_node = None
 
     def save_state(self):
-        """Save the current state of nodes and connections to a file."""
+        """Save the current state of nodes, connections, and hierarchy to a file."""
         data = {
             "nodes": {
                 node_id: {
                     "label": node_data["label"],
                     "x": node_data["x"],
-                    "y": node_data["y"]
+                    "y": node_data["y"],
+                    "level": node_data["level"]
                 }
                 for node_id, node_data in self.nodes.items()
             },
-            "connections": self.connections
+            "hierarchy": {
+                child: parent for child, parent in self.hierarchy.items()
+            }
         }
         with open("mindmap_state.json", "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
     def load_state(self):
-        """Load the saved state of nodes and connections from a file."""
+        """Load the saved state of nodes, connections, and hierarchy from a file."""
         try:
             with open("mindmap_state.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -103,17 +133,30 @@ class MindMapApp:
                     x, y = node_data["x"], node_data["y"]
                     node_id = self.canvas.create_oval(x-30, y-30, x+30, y+30, fill="lightblue", outline="black")
                     text_id = self.canvas.create_text(x, y, text=node_data["label"], font=("Arial", 12))
-                    self.nodes[node_id] = {"text_id": text_id, "label": node_data["label"], "x": x, "y": y}
+                    self.nodes[node_id] = {
+                        "text_id": text_id,
+                        "label": node_data["label"],
+                        "x": x,
+                        "y": y,
+                        "level": node_data["level"]
+                    }
                     self.canvas.tag_bind(text_id, "<Double-1>", lambda event, nid=node_id: self.edit_node_label(nid))
-                self.connections = data["connections"]
-                for connection in self.connections:
-                    parent = connection["parent"]
-                    child = connection["child"]
-                    parent_x, parent_y = self.nodes[parent]["x"], self.nodes[parent]["y"]
-                    child_x, child_y = self.nodes[child]["x"], self.nodes[child]["y"]
-                    self.canvas.create_line(parent_x, parent_y, child_x, child_y, fill="black")
+                
+                # Validate hierarchy and create connections
+                self.hierarchy = {}
+                for child, parent in data["hierarchy"].items():
+                    if int(child) in self.nodes and int(parent) in self.nodes:
+                        self.hierarchy[int(child)] = int(parent)
+                        parent_x, parent_y = self.nodes[int(parent)]["x"], self.nodes[int(parent)]["y"]
+                        child_x, child_y = self.nodes[int(child)]["x"], self.nodes[int(child)]["y"]
+                        self.canvas.create_line(parent_x, parent_y, child_x, child_y, fill="black",
+                                                tags=f"line_{parent}_{child}")
+                    else:
+                        print(f"Warning: Invalid hierarchy reference - child: {child}, parent: {parent}")
         except FileNotFoundError:
-            pass  # No saved state exists
+            print("No saved state found. Starting with an empty mind map.")
+        except json.JSONDecodeError as e:
+            print(f"Error loading mindmap_state.json: {e}. Starting with an empty mind map.")
 
     def on_close(self):
         """Handle the application close event."""
